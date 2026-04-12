@@ -4,6 +4,8 @@
 
 pnpm workspace monorepo using TypeScript. Each package manages its own dependencies.
 
+Sentinel is a web-based Security Logic Auditor available at the root preview path. It lets users paste code, run an LLM-backed security audit, and review severity scoring, line-specific vulnerabilities, remediation steps, and vulnerable-vs-hardened code rewrites.
+
 ## Stack
 
 - **Monorepo tool**: pnpm workspaces
@@ -15,6 +17,12 @@ pnpm workspace monorepo using TypeScript. Each package manages its own dependenc
 - **Validation**: Zod (`zod/v4`), `drizzle-zod`
 - **API codegen**: Orval (from OpenAPI spec)
 - **Build**: esbuild (CJS bundle)
+- **AI**: Replit OpenAI integration via `@workspace/integrations-openai-ai-server`
+
+## Artifacts
+
+- `artifacts/sentinel` — React + Vite frontend for Sentinel.
+- `artifacts/api-server` — shared Express API, including `POST /api/audits` and `GET /api/audit-rules`.
 
 ## Key Commands
 

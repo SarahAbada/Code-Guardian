@@ -10,6 +10,8 @@ servers:
 tags:
   - name: health
     description: Health operations
+  - name: audit
+    description: Sentinel security audit operations
 paths:
   /healthz:
     get:
@@ -24,6 +26,50 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /audits:
+    post:
+      operationId: createSecurityAudit
+      tags: [audit]
+      summary: Analyze a code snippet for security flaws
+      description: Runs a security-first logic audit and returns specific vulnerabilities, remediation guidance, and a hardened rewrite.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SecurityAuditRequest"
+      responses:
+        "200":
+          description: Security audit result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SecurityAuditResult"
+        "400":
+          description: Invalid audit request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Audit failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /audit-rules:
+    get:
+      operationId: getAuditRules
+      tags: [audit]
+      summary: Get Sentinel audit focus areas
+      description: Returns the vulnerability classes Sentinel emphasizes during analysis.
+      responses:
+        "200":
+          description: Audit focus areas
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditRulesResponse"
 components:
   schemas:
     HealthStatus:
@@ -33,4 +79,106 @@ components:
           type: string
       required:
         - status
+    SecurityAuditRequest:
+      type: object
+      properties:
+        code:
+          type: string
+          minLength: 1
+          maxLength: 20000
+        language:
+          type: string
+          description: Optional language hint such as JavaScript, Python, SQL, Go, or Bash.
+          maxLength: 80
+      required:
+        - code
+    Severity:
+      type: string
+      enum: [low, medium, high, critical]
+    Vulnerability:
+      type: object
+      properties:
+        type:
+          type: string
+        severity:
+          $ref: "#/components/schemas/Severity"
+        line:
+          type: integer
+          minimum: 1
+        location:
+          type: string
+        evidence:
+          type: string
+        remediation:
+          type: string
+      required:
+        - type
+        - severity
+        - line
+        - location
+        - evidence
+        - remediation
+    SecureRewrite:
+      type: object
+      properties:
+        vulnerable:
+          type: string
+        hardened:
+          type: string
+        notes:
+          type: string
+      required:
+        - vulnerable
+        - hardened
+        - notes
+    SecurityAuditResult:
+      type: object
+      properties:
+        summary:
+          type: string
+        severity:
+          $ref: "#/components/schemas/Severity"
+        score:
+          type: integer
+          minimum: 0
+          maximum: 100
+        hardened:
+          type: boolean
+        badge:
+          type: string
+        vulnerabilities:
+          type: array
+          items:
+            $ref: "#/components/schemas/Vulnerability"
+        secureRewrite:
+          $ref: "#/components/schemas/SecureRewrite"
+        checklist:
+          type: array
+          items:
+            type: string
+      required:
+        - summary
+        - severity
+        - score
+        - hardened
+        - badge
+        - vulnerabilities
+        - secureRewrite
+        - checklist
+    AuditRulesResponse:
+      type: object
+      properties:
+        rules:
+          type: array
+          items:
+            type: string
+      required:
+        - rules
+    ErrorResponse:
+      type: object
+      properties:
+        message:
+          type: string
+      required:
+        - message
 

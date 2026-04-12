@@ -6,4 +6,11 @@
  * OpenAPI spec version: 0.1.0
  */
 
+export * from "./auditRulesResponse";
+export * from "./errorResponse";
 export * from "./healthStatus";
+export * from "./secureRewrite";
+export * from "./securityAuditRequest";
+export * from "./securityAuditResult";
+export * from "./severity";
+export * from "./vulnerability";

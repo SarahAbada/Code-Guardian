@@ -14,3 +14,60 @@ import * as zod from "zod";
 export const HealthCheckResponse = zod.object({
   status: zod.string(),
 });
+
+/**
+ * Runs a security-first logic audit and returns specific vulnerabilities, remediation guidance, and a hardened rewrite.
+ * @summary Analyze a code snippet for security flaws
+ */
+export const createSecurityAuditBodyCodeMax = 20000;
+
+export const createSecurityAuditBodyLanguageMax = 80;
+
+export const CreateSecurityAuditBody = zod.object({
+  code: zod.string().min(1).max(createSecurityAuditBodyCodeMax),
+  language: zod
+    .string()
+    .max(createSecurityAuditBodyLanguageMax)
+    .optional()
+    .describe(
+      "Optional language hint such as JavaScript, Python, SQL, Go, or Bash.",
+    ),
+});
+
+export const createSecurityAuditResponseScoreMin = 0;
+export const createSecurityAuditResponseScoreMax = 100;
+
+export const CreateSecurityAuditResponse = zod.object({
+  summary: zod.string(),
+  severity: zod.enum(["low", "medium", "high", "critical"]),
+  score: zod
+    .number()
+    .min(createSecurityAuditResponseScoreMin)
+    .max(createSecurityAuditResponseScoreMax),
+  hardened: zod.boolean(),
+  badge: zod.string(),
+  vulnerabilities: zod.array(
+    zod.object({
+      type: zod.string(),
+      severity: zod.enum(["low", "medium", "high", "critical"]),
+      line: zod.number().min(1),
+      location: zod.string(),
+      evidence: zod.string(),
+      remediation: zod.string(),
+    }),
+  ),
+  secureRewrite: zod.object({
+    vulnerable: zod.string(),
+    hardened: zod.string(),
+    notes: zod.string(),
+  }),
+  checklist: zod.array(zod.string()),
+});
+
+/**
+ * Returns the vulnerability classes Sentinel emphasizes during analysis.
+ * @summary Get Sentinel audit focus areas
+ */
+export const GetAuditRulesResponse = zod.object({
+  rules: zod.array(zod.string()),
+});

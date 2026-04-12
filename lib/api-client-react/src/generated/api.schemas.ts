@@ -8,3 +8,64 @@
 export interface HealthStatus {
   status: string;
 }
+
+export interface SecurityAuditRequest {
+  /**
+   * @minLength 1
+   * @maxLength 20000
+   */
+  code: string;
+  /**
+   * Optional language hint such as JavaScript, Python, SQL, Go, or Bash.
+   * @maxLength 80
+   */
+  language?: string;
+}
+
+export type Severity = (typeof Severity)[keyof typeof Severity];
+
+export const Severity = {
+  low: "low",
+  medium: "medium",
+  high: "high",
+  critical: "critical",
+} as const;
+
+export interface Vulnerability {
+  type: string;
+  severity: Severity;
+  /** @minimum 1 */
+  line: number;
+  location: string;
+  evidence: string;
+  remediation: string;
+}
+
+export interface SecureRewrite {
+  vulnerable: string;
+  hardened: string;
+  notes: string;
+}
+
+export interface SecurityAuditResult {
+  summary: string;
+  severity: Severity;
+  /**
+   * @minimum 0
+   * @maximum 100
+   */
+  score: number;
+  hardened: boolean;
+  badge: string;
+  vulnerabilities: Vulnerability[];
+  secureRewrite: SecureRewrite;
+  checklist: string[];
+}
+
+export interface AuditRulesResponse {
+  rules: string[];
+}
+
+export interface ErrorResponse {
+  message: string;
+}
