@@ -9,6 +9,13 @@ export interface HealthStatus {
   status: string;
 }
 
+export type AuditMode = (typeof AuditMode)[keyof typeof AuditMode];
+
+export const AuditMode = {
+  code: "code",
+  dependency: "dependency",
+} as const;
+
 export interface SecurityAuditRequest {
   /**
    * @minLength 1
@@ -20,6 +27,7 @@ export interface SecurityAuditRequest {
    * @maxLength 80
    */
   language?: string;
+  mode?: AuditMode;
 }
 
 export type Severity = (typeof Severity)[keyof typeof Severity];
@@ -47,6 +55,42 @@ export interface SecureRewrite {
   notes: string;
 }
 
+export type DependencyStatus =
+  (typeof DependencyStatus)[keyof typeof DependencyStatus];
+
+export const DependencyStatus = {
+  safe: "safe",
+  outdated: "outdated",
+  vulnerable: "vulnerable",
+  unknown: "unknown",
+} as const;
+
+export interface DependencyCve {
+  id: string;
+  severity: Severity;
+  description: string;
+}
+
+export interface DependencyFinding {
+  name: string;
+  currentVersion: string;
+  ecosystem: string;
+  status: DependencyStatus;
+  safeVersion?: string;
+  advisory?: string;
+  cves: DependencyCve[];
+}
+
+export interface AttackVector {
+  narrative: string;
+  attackerProfile: string;
+  steps: string[];
+  proofOfConcept: string;
+  pocLanguage: string;
+  impact: string;
+  mitigation: string;
+}
+
 export interface SecurityAuditResult {
   summary: string;
   severity: Severity;
@@ -57,9 +101,54 @@ export interface SecurityAuditResult {
   score: number;
   hardened: boolean;
   badge: string;
+  mode: AuditMode;
   vulnerabilities: Vulnerability[];
   secureRewrite: SecureRewrite;
   checklist: string[];
+  attackVector: AttackVector;
+  dependencies?: DependencyFinding[];
+}
+
+export type AuditChatMessageRole =
+  (typeof AuditChatMessageRole)[keyof typeof AuditChatMessageRole];
+
+export const AuditChatMessageRole = {
+  user: "user",
+  assistant: "assistant",
+} as const;
+
+export interface AuditChatMessage {
+  role: AuditChatMessageRole;
+  /**
+   * @minLength 1
+   * @maxLength 4000
+   */
+  content: string;
+}
+
+export interface AuditChatContext {
+  /** @maxLength 20000 */
+  code: string;
+  /** @maxLength 80 */
+  language?: string;
+  mode?: AuditMode;
+  /** @maxLength 4000 */
+  summary?: string;
+  vulnerabilities?: Vulnerability[];
+  dependencies?: DependencyFinding[];
+}
+
+export interface AuditChatRequest {
+  /**
+   * @minItems 1
+   * @maxItems 30
+   */
+  messages: AuditChatMessage[];
+  context: AuditChatContext;
+}
+
+export interface AuditChatResponse {
+  reply: string;
 }
 
 export interface AuditRulesResponse {

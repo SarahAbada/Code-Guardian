@@ -6,7 +6,17 @@
  * OpenAPI spec version: 0.1.0
  */
 
+export * from "./attackVector";
+export * from "./auditChatContext";
+export * from "./auditChatMessage";
+export * from "./auditChatMessageRole";
+export * from "./auditChatRequest";
+export * from "./auditChatResponse";
+export * from "./auditMode";
 export * from "./auditRulesResponse";
+export * from "./dependencyCve";
+export * from "./dependencyFinding";
+export * from "./dependencyStatus";
 export * from "./errorResponse";
 export * from "./healthStatus";
 export * from "./secureRewrite";

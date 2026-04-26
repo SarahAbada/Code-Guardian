@@ -32,6 +32,7 @@ export const CreateSecurityAuditBody = zod.object({
     .describe(
       "Optional language hint such as JavaScript, Python, SQL, Go, or Bash.",
     ),
+  mode: zod.enum(["code", "dependency"]).optional(),
 });
 
 export const createSecurityAuditResponseScoreMin = 0;
@@ -46,6 +47,7 @@ export const CreateSecurityAuditResponse = zod.object({
     .max(createSecurityAuditResponseScoreMax),
   hardened: zod.boolean(),
   badge: zod.string(),
+  mode: zod.enum(["code", "dependency"]),
   vulnerabilities: zod.array(
     zod.object({
       type: zod.string(),
@@ -62,6 +64,104 @@ export const CreateSecurityAuditResponse = zod.object({
     notes: zod.string(),
   }),
   checklist: zod.array(zod.string()),
+  attackVector: zod.object({
+    narrative: zod.string(),
+    attackerProfile: zod.string(),
+    steps: zod.array(zod.string()),
+    proofOfConcept: zod.string(),
+    pocLanguage: zod.string(),
+    impact: zod.string(),
+    mitigation: zod.string(),
+  }),
+  dependencies: zod
+    .array(
+      zod.object({
+        name: zod.string(),
+        currentVersion: zod.string(),
+        ecosystem: zod.string(),
+        status: zod.enum(["safe", "outdated", "vulnerable", "unknown"]),
+        safeVersion: zod.string().optional(),
+        advisory: zod.string().optional(),
+        cves: zod.array(
+          zod.object({
+            id: zod.string(),
+            severity: zod.enum(["low", "medium", "high", "critical"]),
+            description: zod.string(),
+          }),
+        ),
+      }),
+    )
+    .optional(),
+});
+
+/**
+ * Continues a conversation grounded in the most recent Sentinel audit context.
+ * @summary Ask follow-up questions about a Sentinel audit
+ */
+export const chatWithAuditBodyMessagesItemContentMax = 4000;
+
+export const chatWithAuditBodyMessagesMax = 30;
+
+export const chatWithAuditBodyContextCodeMax = 20000;
+
+export const chatWithAuditBodyContextLanguageMax = 80;
+
+export const chatWithAuditBodyContextSummaryMax = 4000;
+
+export const ChatWithAuditBody = zod.object({
+  messages: zod
+    .array(
+      zod.object({
+        role: zod.enum(["user", "assistant"]),
+        content: zod
+          .string()
+          .min(1)
+          .max(chatWithAuditBodyMessagesItemContentMax),
+      }),
+    )
+    .min(1)
+    .max(chatWithAuditBodyMessagesMax),
+  context: zod.object({
+    code: zod.string().max(chatWithAuditBodyContextCodeMax),
+    language: zod.string().max(chatWithAuditBodyContextLanguageMax).optional(),
+    mode: zod.enum(["code", "dependency"]).optional(),
+    summary: zod.string().max(chatWithAuditBodyContextSummaryMax).optional(),
+    vulnerabilities: zod
+      .array(
+        zod.object({
+          type: zod.string(),
+          severity: zod.enum(["low", "medium", "high", "critical"]),
+          line: zod.number().min(1),
+          location: zod.string(),
+          evidence: zod.string(),
+          remediation: zod.string(),
+        }),
+      )
+      .optional(),
+    dependencies: zod
+      .array(
+        zod.object({
+          name: zod.string(),
+          currentVersion: zod.string(),
+          ecosystem: zod.string(),
+          status: zod.enum(["safe", "outdated", "vulnerable", "unknown"]),
+          safeVersion: zod.string().optional(),
+          advisory: zod.string().optional(),
+          cves: zod.array(
+            zod.object({
+              id: zod.string(),
+              severity: zod.enum(["low", "medium", "high", "critical"]),
+              description: zod.string(),
+            }),
+          ),
+        }),
+      )
+      .optional(),
+  }),
+});
+
+export const ChatWithAuditResponse = zod.object({
+  reply: zod.string(),
 });
 
 /**

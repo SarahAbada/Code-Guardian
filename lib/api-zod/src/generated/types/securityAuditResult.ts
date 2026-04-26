@@ -5,6 +5,9 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { AttackVector } from "./attackVector";
+import type { AuditMode } from "./auditMode";
+import type { DependencyFinding } from "./dependencyFinding";
 import type { SecureRewrite } from "./secureRewrite";
 import type { Severity } from "./severity";
 import type { Vulnerability } from "./vulnerability";
@@ -19,7 +22,10 @@ export interface SecurityAuditResult {
   score: number;
   hardened: boolean;
   badge: string;
+  mode: AuditMode;
   vulnerabilities: Vulnerability[];
   secureRewrite: SecureRewrite;
   checklist: string[];
+  attackVector: AttackVector;
+  dependencies?: DependencyFinding[];
 }

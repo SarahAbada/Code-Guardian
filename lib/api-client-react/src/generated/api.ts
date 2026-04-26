@@ -17,6 +17,8 @@ import type {
 } from "@tanstack/react-query";
 
 import type {
+  AuditChatRequest,
+  AuditChatResponse,
   AuditRulesResponse,
   ErrorResponse,
   HealthStatus,
@@ -194,6 +196,93 @@ export const useCreateSecurityAudit = <
   TContext
 > => {
   return useMutation(getCreateSecurityAuditMutationOptions(options));
+};
+
+/**
+ * Continues a conversation grounded in the most recent Sentinel audit context.
+ * @summary Ask follow-up questions about a Sentinel audit
+ */
+export const getChatWithAuditUrl = () => {
+  return `/api/audits/chat`;
+};
+
+export const chatWithAudit = async (
+  auditChatRequest: AuditChatRequest,
+  options?: RequestInit,
+): Promise<AuditChatResponse> => {
+  return customFetch<AuditChatResponse>(getChatWithAuditUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(auditChatRequest),
+  });
+};
+
+export const getChatWithAuditMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof chatWithAudit>>,
+    TError,
+    { data: BodyType<AuditChatRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof chatWithAudit>>,
+  TError,
+  { data: BodyType<AuditChatRequest> },
+  TContext
+> => {
+  const mutationKey = ["chatWithAudit"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof chatWithAudit>>,
+    { data: BodyType<AuditChatRequest> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return chatWithAudit(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ChatWithAuditMutationResult = NonNullable<
+  Awaited<ReturnType<typeof chatWithAudit>>
+>;
+export type ChatWithAuditMutationBody = BodyType<AuditChatRequest>;
+export type ChatWithAuditMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Ask follow-up questions about a Sentinel audit
+ */
+export const useChatWithAudit = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof chatWithAudit>>,
+    TError,
+    { data: BodyType<AuditChatRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof chatWithAudit>>,
+  TError,
+  { data: BodyType<AuditChatRequest> },
+  TContext
+> => {
+  return useMutation(getChatWithAuditMutationOptions(options));
 };
 
 /**

@@ -5,6 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { AuditMode } from "./auditMode";
 
 export interface SecurityAuditRequest {
   /**
@@ -17,4 +18,5 @@ export interface SecurityAuditRequest {
    * @maxLength 80
    */
   language?: string;
+  mode?: AuditMode;
 }

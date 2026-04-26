@@ -57,6 +57,37 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /audits/chat:
+    post:
+      operationId: chatWithAudit
+      tags: [audit]
+      summary: Ask follow-up questions about a Sentinel audit
+      description: Continues a conversation grounded in the most recent Sentinel audit context.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AuditChatRequest"
+      responses:
+        "200":
+          description: Sentinel chat reply
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditChatResponse"
+        "400":
+          description: Invalid chat request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Chat failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /audit-rules:
     get:
       operationId: getAuditRules
@@ -79,6 +110,9 @@ components:
           type: string
       required:
         - status
+    AuditMode:
+      type: string
+      enum: [code, dependency]
     SecurityAuditRequest:
       type: object
       properties:
@@ -90,6 +124,8 @@ components:
           type: string
           description: Optional language hint such as JavaScript, Python, SQL, Go, or Bash.
           maxLength: 80
+        mode:
+          $ref: "#/components/schemas/AuditMode"
       required:
         - code
     Severity:
@@ -131,6 +167,74 @@ components:
         - vulnerable
         - hardened
         - notes
+    DependencyStatus:
+      type: string
+      enum: [safe, outdated, vulnerable, unknown]
+    DependencyCve:
+      type: object
+      properties:
+        id:
+          type: string
+        severity:
+          $ref: "#/components/schemas/Severity"
+        description:
+          type: string
+      required:
+        - id
+        - severity
+        - description
+    DependencyFinding:
+      type: object
+      properties:
+        name:
+          type: string
+        currentVersion:
+          type: string
+        ecosystem:
+          type: string
+        status:
+          $ref: "#/components/schemas/DependencyStatus"
+        safeVersion:
+          type: string
+        advisory:
+          type: string
+        cves:
+          type: array
+          items:
+            $ref: "#/components/schemas/DependencyCve"
+      required:
+        - name
+        - currentVersion
+        - ecosystem
+        - status
+        - cves
+    AttackVector:
+      type: object
+      properties:
+        narrative:
+          type: string
+        attackerProfile:
+          type: string
+        steps:
+          type: array
+          items:
+            type: string
+        proofOfConcept:
+          type: string
+        pocLanguage:
+          type: string
+        impact:
+          type: string
+        mitigation:
+          type: string
+      required:
+        - narrative
+        - attackerProfile
+        - steps
+        - proofOfConcept
+        - pocLanguage
+        - impact
+        - mitigation
     SecurityAuditResult:
       type: object
       properties:
@@ -146,6 +250,8 @@ components:
           type: boolean
         badge:
           type: string
+        mode:
+          $ref: "#/components/schemas/AuditMode"
         vulnerabilities:
           type: array
           items:
@@ -156,15 +262,81 @@ components:
           type: array
           items:
             type: string
+        attackVector:
+          $ref: "#/components/schemas/AttackVector"
+        dependencies:
+          type: array
+          items:
+            $ref: "#/components/schemas/DependencyFinding"
       required:
         - summary
         - severity
         - score
         - hardened
         - badge
+        - mode
         - vulnerabilities
         - secureRewrite
         - checklist
+        - attackVector
+    AuditChatMessage:
+      type: object
+      properties:
+        role:
+          type: string
+          enum: [user, assistant]
+        content:
+          type: string
+          minLength: 1
+          maxLength: 4000
+      required:
+        - role
+        - content
+    AuditChatContext:
+      type: object
+      properties:
+        code:
+          type: string
+          maxLength: 20000
+        language:
+          type: string
+          maxLength: 80
+        mode:
+          $ref: "#/components/schemas/AuditMode"
+        summary:
+          type: string
+          maxLength: 4000
+        vulnerabilities:
+          type: array
+          items:
+            $ref: "#/components/schemas/Vulnerability"
+        dependencies:
+          type: array
+          items:
+            $ref: "#/components/schemas/DependencyFinding"
+      required:
+        - code
+    AuditChatRequest:
+      type: object
+      properties:
+        messages:
+          type: array
+          minItems: 1
+          maxItems: 30
+          items:
+            $ref: "#/components/schemas/AuditChatMessage"
+        context:
+          $ref: "#/components/schemas/AuditChatContext"
+      required:
+        - messages
+        - context
+    AuditChatResponse:
+      type: object
+      properties:
+        reply:
+          type: string
+      required:
+        - reply
     AuditRulesResponse:
       type: object
       properties:
@@ -181,4 +353,3 @@ components:
           type: string
       required:
         - message
-
