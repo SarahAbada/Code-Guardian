@@ -47,6 +47,7 @@ import {
   Skull,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { TokenManager } from "@/components/token-manager";
 
 type Mode = "code" | "dependency";
 
@@ -370,6 +371,8 @@ export default function Home() {
                 )}
               </CardContent>
             </Card>
+
+            <TokenManager />
           </div>
 
           {/* Right Column - Results */}
