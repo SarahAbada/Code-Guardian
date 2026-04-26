@@ -45,17 +45,77 @@ function extractJson(content: string) {
 }
 
 const codeAuditSystemPrompt =
-  'You are Sentinel, a senior offensive security researcher. Audit the supplied source code with a security-first mindset and return ONLY valid JSON matching exactly this shape: {"summary":"string","severity":"low|medium|high|critical","score":0-100,"hardened":boolean,"badge":"string","mode":"code","vulnerabilities":[{"type":"string","severity":"low|medium|high|critical","line":1,"location":"string","evidence":"string","remediation":"string"}],"secureRewrite":{"vulnerable":"string","hardened":"string","notes":"string"},"checklist":["string"],"attackVector":{"narrative":"string","attackerProfile":"string","steps":["string"],"proofOfConcept":"string","pocLanguage":"string","impact":"string","mitigation":"string"},"dependencies":[]}. ' +
+  'You are Sentinel, a senior offensive security researcher. Audit the supplied source code with a strict, paranoid, security-first mindset and return ONLY valid JSON matching exactly this shape: {"summary":"string","severity":"low|medium|high|critical","score":0-100,"hardened":boolean,"badge":"string","mode":"code","vulnerabilities":[{"type":"string","severity":"low|medium|high|critical","line":1,"location":"string","evidence":"string","remediation":"string"}],"secureRewrite":{"vulnerable":"string","hardened":"string","notes":"string"},"checklist":["string"],"attackVector":{"narrative":"string","attackerProfile":"string","steps":["string"],"proofOfConcept":"string","pocLanguage":"string","impact":"string","mitigation":"string"},"dependencies":[]}. ' +
   "Use exact line numbers from the numbered code. Inspect for SQL injection, XSS, broken authentication and authorization, insecure command execution, insecure API surfaces, system hardening problems, memory and DoS risks, and secret exposure. " +
+  "STRICT SCORING RUBRIC (apply rigorously, prefer LOWER scores when in doubt): " +
+  "- 0-15: ANY critical vulnerability present (RCE, SQL injection, auth bypass, hardcoded prod secrets, command injection). " +
+  "- 16-35: ANY high-severity vulnerability present (XSS, missing authentication, insecure deserialization, sensitive data exposure, path traversal). " +
+  "- 36-60: ANY medium-severity vulnerability present (weak crypto, missing rate-limiting, verbose errors, weak input validation). " +
+  "- 61-80: Only low-severity issues (style/hardening gaps, missing defense-in-depth). " +
+  "- 81-100: No vulnerabilities and code follows defense-in-depth practices. " +
+  "Be strict, not lenient. If you find even one critical issue the score MUST be 15 or lower regardless of how many other things look fine. " +
   "Always populate attackVector with a realistic exploitation walkthrough for the highest-risk vulnerability detected and a runnable proof-of-concept script (curl, python, javascript, or bash) that demonstrates the exploit against the audited code. pocLanguage must be a single short identifier like 'bash', 'python', 'javascript', 'curl', or 'http'. " +
-  "If the code is clean, set hardened true, badge 'System Hardened', vulnerabilities to [], severity 'low', and the attackVector should describe the most likely theoretical attack a hacker would have attempted plus a defensive PoC showing why it would fail. " +
+  "If the code is genuinely clean, set hardened true, badge 'System Hardened', vulnerabilities to [], severity 'low', score 90-100, and the attackVector should describe the most likely theoretical attack a hacker would have attempted plus a defensive PoC showing why it would fail. " +
   "Keep dependencies as an empty array for code mode. Never include any prose outside the JSON.";
 
 const dependencyAuditSystemPrompt =
   'You are Sentinel, a senior supply-chain security researcher. The user pasted a dependency manifest (package.json, requirements.txt, Pipfile, Cargo.toml, go.mod, Gemfile, or similar). Identify each declared dependency and its version, then assess it against well-known public CVEs and security advisories you are confident about. Return ONLY valid JSON matching exactly this shape: {"summary":"string","severity":"low|medium|high|critical","score":0-100,"hardened":boolean,"badge":"string","mode":"dependency","vulnerabilities":[{"type":"string","severity":"low|medium|high|critical","line":1,"location":"string","evidence":"string","remediation":"string"}],"secureRewrite":{"vulnerable":"string","hardened":"string","notes":"string"},"checklist":["string"],"attackVector":{"narrative":"string","attackerProfile":"string","steps":["string"],"proofOfConcept":"string","pocLanguage":"string","impact":"string","mitigation":"string"},"dependencies":[{"name":"string","currentVersion":"string","ecosystem":"npm|pypi|crates|go|rubygems|maven|nuget|other","status":"safe|outdated|vulnerable|unknown","safeVersion":"string","advisory":"string","cves":[{"id":"CVE-YYYY-NNNN","severity":"low|medium|high|critical","description":"string"}]}]}. ' +
   "Every declared dependency MUST appear in the dependencies array exactly once. Mark a dependency 'vulnerable' only when you have high confidence about a real published CVE and include the CVE identifier(s); otherwise use 'outdated', 'safe', or 'unknown' and leave cves as []. Always populate safeVersion with the recommended minimum patched version when status is vulnerable or outdated. " +
+  "STRICT SCORING RUBRIC (apply rigorously, prefer LOWER scores when in doubt): " +
+  "- 0-15: ANY dependency with a critical CVE present. " +
+  "- 16-35: ANY dependency with a high-severity CVE present. " +
+  "- 36-60: ANY dependency with a medium CVE OR outdated dependencies with known security fixes. " +
+  "- 61-80: Only minor outdated packages with no published CVEs. " +
+  "- 81-100: All dependencies are on safe, current, well-maintained versions. " +
+  "Be strict, not lenient. One critical CVE caps the score at 15 regardless of how many other deps are clean. " +
   "vulnerabilities[] should mirror the most serious dependency issues, using the manifest line number for each. secureRewrite.vulnerable should be the original manifest, secureRewrite.hardened should be the same manifest with insecure versions bumped to safe versions, notes should explain the upgrades. " +
-  "attackVector should describe how a real attacker chains the most severe vulnerable dependency in this manifest into a working exploit, including a runnable PoC (curl, python, javascript, or bash) and a one-word pocLanguage. If everything looks clean, set hardened true, severity 'low', and provide a defensive narrative. Never include any prose outside the JSON.";
+  "attackVector should describe how a real attacker chains the most severe vulnerable dependency in this manifest into a working exploit, including a runnable PoC (curl, python, javascript, or bash) and a one-word pocLanguage. If everything looks clean, set hardened true, severity 'low', score 90-100, and provide a defensive narrative. Never include any prose outside the JSON.";
+
+const severityScoreCeiling = {
+  critical: 15,
+  high: 35,
+  medium: 60,
+  low: 80,
+} as const;
+
+function enforceStrictScore(
+  modelScore: number,
+  highestSeverity: "low" | "medium" | "high" | "critical",
+  vulnerabilityCount: number,
+  dependencyHasCriticalCve: boolean,
+  dependencyHasHighCve: boolean,
+  dependencyHasIssue: boolean,
+  hardened: boolean,
+): number {
+  const sanitized = Math.min(Math.max(Math.round(modelScore), 0), 100);
+
+  if (hardened) {
+    return Math.max(sanitized, 85);
+  }
+
+  let ceiling = 100;
+
+  if (vulnerabilityCount > 0) {
+    ceiling = Math.min(ceiling, severityScoreCeiling[highestSeverity]);
+  }
+
+  if (dependencyHasCriticalCve) {
+    ceiling = Math.min(ceiling, severityScoreCeiling.critical);
+  } else if (dependencyHasHighCve) {
+    ceiling = Math.min(ceiling, severityScoreCeiling.high);
+  } else if (dependencyHasIssue) {
+    ceiling = Math.min(ceiling, severityScoreCeiling.medium);
+  }
+
+  if (vulnerabilityCount >= 5) {
+    ceiling = Math.max(0, ceiling - 5);
+  }
+  if (vulnerabilityCount >= 10) {
+    ceiling = Math.max(0, ceiling - 5);
+  }
+
+  return Math.min(sanitized, ceiling);
+}
 
 function normalizeAuditResult(
   raw: unknown,
@@ -79,19 +139,44 @@ function normalizeAuditResult(
       severityRank[vulnerability.severity] > severityRank[highest]
         ? vulnerability.severity
         : highest,
-    parsed.severity,
+    "low",
   );
-  const dependencyHasIssue = (parsed.dependencies ?? []).some(
+  const dependencies = parsed.dependencies ?? [];
+  const dependencyHasIssue = dependencies.some(
     (dep) => dep.status === "vulnerable" || dep.status === "outdated",
   );
+  const dependencyHasCriticalCve = dependencies.some((dep) =>
+    (dep.cves ?? []).some((cve) => cve.severity === "critical"),
+  );
+  const dependencyHasHighCve = dependencies.some((dep) =>
+    (dep.cves ?? []).some((cve) => cve.severity === "high"),
+  );
   const hardened = vulnerabilities.length === 0 && !dependencyHasIssue;
+
+  const finalSeverity: "low" | "medium" | "high" | "critical" = hardened
+    ? "low"
+    : dependencyHasCriticalCve
+      ? "critical"
+      : dependencyHasHighCve && severityRank[highestSeverity] < severityRank.high
+        ? "high"
+        : highestSeverity;
+
+  const enforcedScore = enforceStrictScore(
+    parsed.score,
+    finalSeverity,
+    vulnerabilities.length,
+    dependencyHasCriticalCve,
+    dependencyHasHighCve,
+    dependencyHasIssue,
+    hardened,
+  );
 
   return CreateSecurityAuditResponse.parse({
     ...parsed,
     mode,
     vulnerabilities,
-    severity: hardened ? "low" : highestSeverity,
-    score: Math.min(Math.max(Math.round(parsed.score), 0), 100),
+    severity: finalSeverity,
+    score: enforcedScore,
     hardened,
     badge: hardened ? "System Hardened" : parsed.badge,
     secureRewrite: {
@@ -99,7 +184,7 @@ function normalizeAuditResult(
       hardened: parsed.secureRewrite.hardened || code,
       notes: parsed.secureRewrite.notes,
     },
-    dependencies: parsed.dependencies ?? [],
+    dependencies,
   });
 }
 
