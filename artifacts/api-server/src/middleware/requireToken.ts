@@ -1,7 +1,7 @@
 import type { NextFunction, Request, Response } from "express";
 import { db, projectTokens } from "@workspace/db";
 import { eq, sql } from "drizzle-orm";
-import { extractBearerToken, hashToken } from "../lib/tokens";
+import { constantTimeEqualHex, extractBearerToken, hashToken } from "../lib/tokens";
 import { checkRateLimit } from "../lib/rateLimit";
 
 export type ProjectTokenRow = typeof projectTokens.$inferSelect;
@@ -29,12 +29,18 @@ export async function requireToken(
     return;
   }
 
+  const presentedPrefix = presented.slice(0, 12);
   const presentedHash = hashToken(presented);
-  const [tokenRow] = await db
+
+  const candidateRows = await db
     .select()
     .from(projectTokens)
-    .where(eq(projectTokens.tokenHash, presentedHash))
-    .limit(1);
+    .where(eq(projectTokens.prefix, presentedPrefix));
+
+  const tokenRow =
+    candidateRows.find((row) =>
+      constantTimeEqualHex(row.tokenHash, presentedHash),
+    ) ?? null;
 
   if (!tokenRow || tokenRow.revokedAt) {
     res.status(401).json({ message: "Invalid or revoked API token." });

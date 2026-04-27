@@ -9,7 +9,7 @@ import type {
   SecurityAuditResult,
   DependencyFinding,
   AuditChatMessage,
-} from "@workspace/api-client-react/src/generated/api.schemas";
+} from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";

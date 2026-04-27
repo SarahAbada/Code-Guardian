@@ -1,4 +1,13 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import {
+  useListProjectTokens,
+  useCreateProjectToken,
+  useRevokeProjectToken,
+  getListProjectTokensQueryKey,
+  ApiError,
+  type CreateProjectTokenResponse,
+} from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -21,78 +30,30 @@ import {
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
-type TokenSummary = {
-  id: number;
-  name: string;
-  prefix: string;
-  createdAt: string;
-  lastUsedAt: string | null;
-  requestCount: number;
-  revoked: boolean;
-};
-
-type CreateTokenResponse = {
-  id: number;
-  name: string;
-  prefix: string;
-  createdAt: string;
-  token: string;
-  notice: string;
-};
-
-const tokensUrl = `${import.meta.env.BASE_URL}api/tokens`;
-const tokenUrl = (id: number) => `${import.meta.env.BASE_URL}api/tokens/${id}`;
-
 const ADMIN_TOKEN_STORAGE_KEY = "sentinel.adminToken";
 
-class AdminAuthError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "AdminAuthError";
+function getErrorMessage(err: unknown): string {
+  if (err instanceof ApiError) {
+    const data = err.data as { message?: string } | null;
+    return data?.message ?? err.message;
   }
+  if (err instanceof Error) return err.message;
+  return "Unknown error.";
 }
 
-class AdminConfigError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "AdminConfigError";
-  }
+function isAuthError(err: unknown): boolean {
+  return err instanceof ApiError && err.status === 401;
 }
 
-async function jsonFetch<T>(
-  url: string,
-  init: RequestInit | undefined,
-  adminToken: string,
-): Promise<T> {
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-    ...((init?.headers as Record<string, string> | undefined) ?? {}),
-  };
-  if (adminToken) {
-    headers["X-Admin-Token"] = adminToken;
-  }
-  const res = await fetch(url, { ...init, headers });
-  if (res.status === 401) {
-    throw new AdminAuthError("Admin token is missing or incorrect.");
-  }
-  if (res.status === 503) {
-    throw new AdminConfigError(
-      "Admin auth is not configured on the server. Set the ADMIN_TOKEN environment variable.",
-    );
-  }
-  if (!res.ok) {
-    const body = (await res.json().catch(() => ({}))) as { message?: string };
-    throw new Error(body.message ?? `Request failed: ${res.status}`);
-  }
-  return (await res.json()) as T;
+function isConfigError(err: unknown): boolean {
+  return err instanceof ApiError && err.status === 503;
 }
 
 export function TokenManager() {
-  const [tokens, setTokens] = useState<TokenSummary[]>([]);
-  const [loading, setLoading] = useState(false);
   const [name, setName] = useState("");
-  const [creating, setCreating] = useState(false);
-  const [newToken, setNewToken] = useState<CreateTokenResponse | null>(null);
+  const [newToken, setNewToken] = useState<CreateProjectTokenResponse | null>(
+    null,
+  );
   const [copied, setCopied] = useState(false);
   const [adminToken, setAdminToken] = useState<string>(() => {
     if (typeof window === "undefined") return "";
@@ -101,6 +62,57 @@ export function TokenManager() {
   const [adminUnlocked, setAdminUnlocked] = useState(false);
   const [adminError, setAdminError] = useState<string | null>(null);
   const { toast } = useToast();
+  const queryClient = useQueryClient();
+
+  const adminHeaders = useMemo(
+    () => (adminToken ? { "X-Admin-Token": adminToken } : undefined),
+    [adminToken],
+  );
+
+  const tokensQuery = useListProjectTokens({
+    query: {
+      queryKey: getListProjectTokensQueryKey(),
+      enabled: adminUnlocked && Boolean(adminToken),
+    },
+    request: { headers: adminHeaders },
+  });
+
+  const createMutation = useCreateProjectToken({
+    request: { headers: adminHeaders },
+  });
+
+  const revokeMutation = useRevokeProjectToken({
+    request: { headers: adminHeaders },
+  });
+
+  const tokens = tokensQuery.data?.tokens ?? [];
+  const loading = tokensQuery.isFetching;
+
+  useEffect(() => {
+    if (!tokensQuery.error) return;
+    if (isAuthError(tokensQuery.error)) {
+      setAdminUnlocked(false);
+      setAdminError("Admin token is missing or incorrect.");
+    } else if (isConfigError(tokensQuery.error)) {
+      setAdminUnlocked(false);
+      setAdminError(
+        "Admin auth is not configured on the server. Set the ADMIN_TOKEN environment variable.",
+      );
+    } else {
+      toast({
+        title: "Token fetch failed",
+        description: getErrorMessage(tokensQuery.error),
+        variant: "destructive",
+      });
+    }
+  }, [tokensQuery.error, toast]);
+
+  useEffect(() => {
+    if (tokensQuery.isSuccess) {
+      setAdminUnlocked(true);
+      setAdminError(null);
+    }
+  }, [tokensQuery.isSuccess]);
 
   const persistAdminToken = (value: string) => {
     setAdminToken(value);
@@ -113,39 +125,8 @@ export function TokenManager() {
     }
   };
 
-  const refresh = async (overrideToken?: string) => {
-    setLoading(true);
-    try {
-      const data = await jsonFetch<{ tokens: TokenSummary[] }>(
-        tokensUrl,
-        undefined,
-        overrideToken ?? adminToken,
-      );
-      setTokens(data.tokens);
-      setAdminUnlocked(true);
-      setAdminError(null);
-    } catch (err) {
-      if (err instanceof AdminAuthError) {
-        setAdminUnlocked(false);
-        setAdminError(err.message);
-      } else if (err instanceof AdminConfigError) {
-        setAdminUnlocked(false);
-        setAdminError(err.message);
-      } else {
-        toast({
-          title: "Token fetch failed",
-          description: (err as Error).message,
-          variant: "destructive",
-        });
-      }
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    void refresh();
-  }, []);
+  const invalidateTokensList = () =>
+    queryClient.invalidateQueries({ queryKey: getListProjectTokensQueryKey() });
 
   const handleCreate = async () => {
     const trimmed = name.trim();
@@ -157,46 +138,41 @@ export function TokenManager() {
       });
       return;
     }
-    setCreating(true);
     try {
-      const created = await jsonFetch<CreateTokenResponse>(
-        tokensUrl,
-        { method: "POST", body: JSON.stringify({ name: trimmed }) },
-        adminToken,
-      );
+      const created = await createMutation.mutateAsync({
+        data: { name: trimmed },
+      });
       setNewToken(created);
       setName("");
       setCopied(false);
-      await refresh();
+      await invalidateTokensList();
     } catch (err) {
-      if (err instanceof AdminAuthError) {
+      if (isAuthError(err)) {
         setAdminUnlocked(false);
-        setAdminError(err.message);
+        setAdminError("Admin token is missing or incorrect.");
       } else {
         toast({
           title: "Could not create token",
-          description: (err as Error).message,
+          description: getErrorMessage(err),
           variant: "destructive",
         });
       }
-    } finally {
-      setCreating(false);
     }
   };
 
   const handleRevoke = async (id: number) => {
     try {
-      await jsonFetch(tokenUrl(id), { method: "DELETE" }, adminToken);
-      await refresh();
+      await revokeMutation.mutateAsync({ id });
+      await invalidateTokensList();
       toast({ title: "Token revoked", description: `Token #${id} revoked.` });
     } catch (err) {
-      if (err instanceof AdminAuthError) {
+      if (isAuthError(err)) {
         setAdminUnlocked(false);
-        setAdminError(err.message);
+        setAdminError("Admin token is missing or incorrect.");
       } else {
         toast({
           title: "Revoke failed",
-          description: (err as Error).message,
+          description: getErrorMessage(err),
           variant: "destructive",
         });
       }
@@ -219,8 +195,15 @@ export function TokenManager() {
   };
 
   const handleAdminUnlock = async () => {
-    persistAdminToken(adminToken.trim());
-    await refresh(adminToken.trim());
+    const trimmed = adminToken.trim();
+    persistAdminToken(trimmed);
+    setAdminError(null);
+    if (!trimmed) {
+      setAdminError("Admin token is required.");
+      return;
+    }
+    setAdminUnlocked(true);
+    await tokensQuery.refetch();
   };
 
   if (!adminUnlocked) {
@@ -298,19 +281,19 @@ export function TokenManager() {
             value={name}
             onChange={(e) => setName(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && !creating) handleCreate();
+              if (e.key === "Enter" && !createMutation.isPending) handleCreate();
             }}
             data-testid="input-token-name"
             className="rounded-none border-border bg-background focus-visible:ring-1 focus-visible:ring-primary font-mono text-xs"
           />
           <Button
             onClick={handleCreate}
-            disabled={creating}
+            disabled={createMutation.isPending}
             data-testid="button-create-token"
             className="rounded-none border border-primary hover:bg-primary hover:text-primary-foreground uppercase tracking-widest text-xs"
             variant="ghost"
           >
-            {creating ? (
+            {createMutation.isPending ? (
               <Loader2 className="w-4 h-4 animate-spin" />
             ) : (
               <>
