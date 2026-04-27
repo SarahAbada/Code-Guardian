@@ -1,7 +1,13 @@
 import { Router, type IRouter } from "express";
 import { db, projectTokens } from "@workspace/db";
-import { desc, eq, isNull } from "drizzle-orm";
-import { CreateProjectTokenBody } from "@workspace/api-zod";
+import { desc, eq } from "drizzle-orm";
+import {
+  CreateProjectTokenBody,
+  ListProjectTokensResponse,
+  RevokeProjectTokenParams,
+  RevokeProjectTokenResponse,
+  type CreateProjectTokenResponse,
+} from "@workspace/api-zod";
 import { generateToken } from "../lib/tokens";
 import { requireAdmin } from "../middleware/requireAdmin";
 
@@ -23,17 +29,19 @@ router.get("/tokens", async (_req, res) => {
     .from(projectTokens)
     .orderBy(desc(projectTokens.createdAt));
 
-  res.json({
-    tokens: rows.map((row) => ({
-      id: row.id,
-      name: row.name,
-      prefix: row.prefix,
-      createdAt: row.createdAt.toISOString(),
-      lastUsedAt: row.lastUsedAt ? row.lastUsedAt.toISOString() : null,
-      requestCount: row.requestCount,
-      revoked: row.revokedAt !== null,
-    })),
-  });
+  res.json(
+    ListProjectTokensResponse.parse({
+      tokens: rows.map((row) => ({
+        id: row.id,
+        name: row.name,
+        prefix: row.prefix,
+        createdAt: row.createdAt,
+        lastUsedAt: row.lastUsedAt,
+        requestCount: row.requestCount,
+        revoked: row.revokedAt !== null,
+      })),
+    }),
+  );
 });
 
 router.post("/tokens", async (req, res) => {
@@ -71,7 +79,7 @@ router.post("/tokens", async (req, res) => {
     return;
   }
 
-  res.status(201).json({
+  const responsePayload = {
     id: created.id,
     name: created.name,
     prefix: created.prefix,
@@ -79,15 +87,20 @@ router.post("/tokens", async (req, res) => {
     token: raw,
     notice:
       "Copy this token now. It is shown once and stored only as a SHA-256 hash on the server.",
-  });
+  } satisfies Omit<CreateProjectTokenResponse, "createdAt"> & {
+    createdAt: string;
+  };
+
+  res.status(201).json(responsePayload);
 });
 
 router.delete("/tokens/:id", async (req, res) => {
-  const id = Number.parseInt(req.params.id ?? "", 10);
-  if (!Number.isFinite(id)) {
+  const paramValidation = RevokeProjectTokenParams.safeParse(req.params);
+  if (!paramValidation.success) {
     res.status(400).json({ message: "Invalid token id." });
     return;
   }
+  const id = paramValidation.data.id;
 
   const [updated] = await db
     .update(projectTokens)
@@ -100,15 +113,7 @@ router.delete("/tokens/:id", async (req, res) => {
     return;
   }
 
-  res.json({ id: updated.id, revoked: true });
+  res.json(RevokeProjectTokenResponse.parse({ id: updated.id, revoked: true }));
 });
-
-export const _internalActiveTokenCount = async () => {
-  const rows = await db
-    .select({ id: projectTokens.id })
-    .from(projectTokens)
-    .where(isNull(projectTokens.revokedAt));
-  return rows.length;
-};
 
 export default router;

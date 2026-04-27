@@ -24,12 +24,37 @@ export function sanitizeForPrompt(input: string): SanitizeResult {
   let sanitized = input;
 
   for (const pattern of INJECTION_PATTERNS) {
+    pattern.lastIndex = 0;
     if (pattern.test(sanitized)) {
       flagged.push(pattern.source);
       sanitized = sanitized.replace(pattern, "[REDACTED:prompt-injection]");
     }
-    pattern.lastIndex = 0;
   }
 
   return { sanitized, flaggedPatterns: flagged };
+}
+
+const CONTROL_CHARS = /[\u0000-\u001f\u007f\u2028\u2029]/g;
+
+export type SanitizeMetadataResult = {
+  sanitized: string;
+  flaggedPatterns: string[];
+  hadControlChars: boolean;
+};
+
+/**
+ * Sanitizes short metadata strings (filename, language hint, etc.) that get
+ * embedded inline into LLM prompts. Strips newlines and control characters so
+ * an attacker cannot inject a fake "system:" line, then runs the same prompt
+ * injection patterns as `sanitizeForPrompt`.
+ */
+export function sanitizeMetadataForPrompt(
+  input: string,
+  maxLength: number,
+): SanitizeMetadataResult {
+  const truncated = input.slice(0, maxLength);
+  const stripped = truncated.replace(CONTROL_CHARS, " ").trim();
+  const hadControlChars = stripped !== truncated.trim();
+  const { sanitized, flaggedPatterns } = sanitizeForPrompt(stripped);
+  return { sanitized, flaggedPatterns, hadControlChars };
 }

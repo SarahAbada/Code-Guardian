@@ -7,6 +7,7 @@ import {
   CreateSecurityAuditResponse,
   GetAuditRulesResponse,
 } from "@workspace/api-zod";
+import { extractJson } from "../lib/llmParsing";
 
 const router: IRouter = Router();
 
@@ -27,22 +28,6 @@ const severityRank = {
   high: 3,
   critical: 4,
 } as const;
-
-function extractJson(content: string) {
-  const trimmed = content.trim();
-  if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
-    return JSON.parse(trimmed);
-  }
-
-  const start = trimmed.indexOf("{");
-  const end = trimmed.lastIndexOf("}");
-
-  if (start === -1 || end === -1 || end <= start) {
-    throw new Error("The model did not return a JSON object.");
-  }
-
-  return JSON.parse(trimmed.slice(start, end + 1));
-}
 
 const codeAuditSystemPrompt =
   'You are Sentinel, a senior offensive security researcher. Audit the supplied source code with a strict, paranoid, security-first mindset and return ONLY valid JSON matching exactly this shape: {"summary":"string","severity":"low|medium|high|critical","score":0-100,"hardened":boolean,"badge":"string","mode":"code","vulnerabilities":[{"type":"string","severity":"low|medium|high|critical","line":1,"location":"string","evidence":"string","remediation":"string"}],"secureRewrite":{"vulnerable":"string","hardened":"string","notes":"string"},"checklist":["string"],"attackVector":{"narrative":"string","attackerProfile":"string","steps":["string"],"proofOfConcept":"string","pocLanguage":"string","impact":"string","mitigation":"string"},"dependencies":[]}. ' +
