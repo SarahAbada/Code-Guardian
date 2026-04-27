@@ -1,0 +1,101 @@
+HA-256 Token Hashing & Timing Safety
+Assessment: Partially correct — constantTimeEqualHex is dead code
+
+tokens.ts exports constantTimeEqualHex, which wraps Node's crypto.timingSafeEqual. The README explicitly claims "Constant-time lookup." However, looking at the actual auth flow in auditCli.ts:
+
+ts
+const [tokenRow] = await db
+  .select()
+  .from(projectTokens)
+  .where(eq(projectTokens.tokenHash, presentedHash))
+  .limit(1);
+The comparison happens as a SQL WHERE clause in Postgres — not via constantTimeEqualHex. This means constantTimeEqualHex is never called anywhere in the codebase and the README's claim is inaccurate as implemented.
+
+Practical risk: Because the hash of the token is compared (not the raw secret), a timing attack would have to distinguish between SHA-256 hex strings, not raw token bytes. The SHA-256 pre-image resistance makes this very hard to exploit in practice. But the architectural claim and the implementation are misaligned, which is a maintainability and audit risk (future engineers may trust the claim without verifying).
+
+Actionable refactor: Fetch the token by prefix/id and then use constantTimeEqualHex to compare the hash in application code, making the implementation match the documented claim
+
+5. Frontend ↔ API Client — Issues to Fix
+Context for the agent: The server-side score override logic (enforceStrictScore + normalizeAuditResult in artifacts/api-server/src/routes/audit.ts) is intentional and correct. It is a deliberate post-processing step that caps the AI model's security_score to a hard ceiling whenever critical or high-severity vulnerabilities are detected, preventing an optimistic model from returning a misleadingly safe score. Do not modify or remove that logic. The issues below are purely about the frontend's interaction with the generated API layer and have nothing to do with score overriding.
+
+Issue 1 — Deep import path bypasses the package barrel (breaks on next codegen)
+File: artifacts/sentinel/src/pages/home.tsx, lines 7–12
+
+ts
+// ❌ Current — imports from a deep generated path
+import type {
+  SecurityAuditRequest,
+  SecurityAuditResult,
+  DependencyFinding,
+  AuditChatMessage,
+} from "@workspace/api-client-react/src/generated/api.schemas";
+The lib/api-client-react/src/index.ts barrel already re-exports * from "./generated/api.schemas", so these types are available at the package root. The deep path is fragile: if orval renames or restructures its output files during the next codegen run, this import breaks silently at the TypeScript level without any build error until runtime.
+
+Fix: Change the import in home.tsx to use the package root:
+
+ts
+// ✅ Correct — imports from the public package surface
+import type {
+  SecurityAuditRequest,
+  SecurityAuditResult,
+  DependencyFinding,
+  AuditChatMessage,
+} from "@workspace/api-client-react";
+No other changes are needed — the types are already re-exported from the barrel.
+
+Issue 2 — TokenManager uses a hand-rolled fetch client, creating duplicated types and bypassing React Query
+Files: artifacts/sentinel/src/components/token-manager.tsx
+
+The token management endpoints (GET /api/tokens, POST /api/tokens, DELETE /api/tokens/:id) are not defined in lib/api-spec/openapi.yaml, so no React Query hooks or Zod validators were ever generated for them. As a result, token-manager.tsx implements its own jsonFetch wrapper, manages loading state with raw useState, and defines TokenSummary and CreateTokenResponse as local TypeScript types that are disconnected from the server-side Drizzle/response shapes. If the server response shape changes, the frontend types silently drift.
+
+Fix — two-step:
+
+Step 1: Add the three token endpoints to lib/api-spec/openapi.yaml under paths, referencing new component schemas TokenSummary, CreateTokenRequest, CreateTokenResponse, and RevokeTokenResponse. Model them after what artifacts/api-server/src/routes/tokens.ts currently returns (the shapes are already stable). Then run:
+
+bash
+pnpm --filter @workspace/api-spec run codegen
+This will generate:
+
+useGetTokens hook
+useCreateToken mutation hook
+useDeleteToken mutation hook
+Typed request/response schemas in lib/api-zod/
+Step 2: Refactor token-manager.tsx to use the generated hooks, remove the jsonFetch helper, remove the local TokenSummary / CreateTokenResponse type definitions, and replace manual loading / creating state with the hooks' isLoading / isPending flags.
+
+Issue 3 — queryClient is configured with retry: false, making the audit fragile under transient errors
+File: artifacts/sentinel/src/App.tsx, lines 8–15
+
+ts
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      refetchOnWindowFocus: false,
+      retry: false,         // ← any transient 500 or network blip permanently fails the audit
+    },
+  },
+});
+retry: false means a single transient network error or brief server restart will permanently fail a mutation and force the user to re-paste their code and re-submit. For the audit mutations (useCreateSecurityAudit, useChatWithAudit) this is particularly disruptive because the payloads can be large.
+
+Fix: Allow 1 retry with a short delay for both queries and mutations:
+
+ts
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      refetchOnWindowFocus: false,
+      retry: 1,
+      retryDelay: 1000,
+    },
+    mutations: {
+      retry: 1,
+      retryDelay: 1000,
+    },
+  },
+});
+Summary of changes
+File	Change
+artifacts/sentinel/src/pages/home.tsx	Fix deep import — use @workspace/api-client-react root
+lib/api-spec/openapi.yaml	Add /tokens, /tokens/{id} paths and schemas
+Run pnpm --filter @workspace/api-spec run codegen	Regenerate hooks and Zod validators
+artifacts/sentinel/src/components/token-manager.tsx	Replace jsonFetch + local types with generated hooks
+artifacts/sentinel/src/App.tsx	Set retry: 1 for queries and mutations
