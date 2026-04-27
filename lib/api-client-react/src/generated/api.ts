@@ -20,8 +20,15 @@ import type {
   AuditChatRequest,
   AuditChatResponse,
   AuditRulesResponse,
+  CliAuditRequest,
+  CliAuditResponse,
+  CreateProjectTokenRequest,
+  CreateProjectTokenResponse,
   ErrorResponse,
   HealthStatus,
+  ListProjectTokensResponse,
+  RateLimitErrorResponse,
+  RevokeProjectTokenResponse,
   SecurityAuditRequest,
   SecurityAuditResult,
 } from "./api.schemas";
@@ -360,3 +367,341 @@ export function useGetAuditRules<
 
   return { ...query, queryKey: queryOptions.queryKey };
 }
+
+/**
+ * Token-gated audit endpoint for git hooks, pre-commit, and CI pipelines. Returns only the strict security score and high or critical vulnerabilities.
+ * @summary Headless CLI / CI security audit
+ */
+export const getRunCliAuditUrl = () => {
+  return `/api/audit-cli`;
+};
+
+export const runCliAudit = async (
+  cliAuditRequest: CliAuditRequest,
+  options?: RequestInit,
+): Promise<CliAuditResponse> => {
+  return customFetch<CliAuditResponse>(getRunCliAuditUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(cliAuditRequest),
+  });
+};
+
+export const getRunCliAuditMutationOptions = <
+  TError = ErrorType<ErrorResponse | RateLimitErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof runCliAudit>>,
+    TError,
+    { data: BodyType<CliAuditRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof runCliAudit>>,
+  TError,
+  { data: BodyType<CliAuditRequest> },
+  TContext
+> => {
+  const mutationKey = ["runCliAudit"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof runCliAudit>>,
+    { data: BodyType<CliAuditRequest> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return runCliAudit(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RunCliAuditMutationResult = NonNullable<
+  Awaited<ReturnType<typeof runCliAudit>>
+>;
+export type RunCliAuditMutationBody = BodyType<CliAuditRequest>;
+export type RunCliAuditMutationError = ErrorType<
+  ErrorResponse | RateLimitErrorResponse
+>;
+
+/**
+ * @summary Headless CLI / CI security audit
+ */
+export const useRunCliAudit = <
+  TError = ErrorType<ErrorResponse | RateLimitErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof runCliAudit>>,
+    TError,
+    { data: BodyType<CliAuditRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof runCliAudit>>,
+  TError,
+  { data: BodyType<CliAuditRequest> },
+  TContext
+> => {
+  return useMutation(getRunCliAuditMutationOptions(options));
+};
+
+/**
+ * Admin-only listing of provisioned project tokens (raw token values are never returned).
+ * @summary List provisioned project tokens
+ */
+export const getListProjectTokensUrl = () => {
+  return `/api/tokens`;
+};
+
+export const listProjectTokens = async (
+  options?: RequestInit,
+): Promise<ListProjectTokensResponse> => {
+  return customFetch<ListProjectTokensResponse>(getListProjectTokensUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListProjectTokensQueryKey = () => {
+  return [`/api/tokens`] as const;
+};
+
+export const getListProjectTokensQueryOptions = <
+  TData = Awaited<ReturnType<typeof listProjectTokens>>,
+  TError = ErrorType<ErrorResponse>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof listProjectTokens>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getListProjectTokensQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listProjectTokens>>
+  > = ({ signal }) => listProjectTokens({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listProjectTokens>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListProjectTokensQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listProjectTokens>>
+>;
+export type ListProjectTokensQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary List provisioned project tokens
+ */
+
+export function useListProjectTokens<
+  TData = Awaited<ReturnType<typeof listProjectTokens>>,
+  TError = ErrorType<ErrorResponse>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof listProjectTokens>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListProjectTokensQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * Provisions a new sntl_ token. The raw value is returned exactly once and only its SHA-256 hash is persisted.
+ * @summary Provision a new project token
+ */
+export const getCreateProjectTokenUrl = () => {
+  return `/api/tokens`;
+};
+
+export const createProjectToken = async (
+  createProjectTokenRequest: CreateProjectTokenRequest,
+  options?: RequestInit,
+): Promise<CreateProjectTokenResponse> => {
+  return customFetch<CreateProjectTokenResponse>(getCreateProjectTokenUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(createProjectTokenRequest),
+  });
+};
+
+export const getCreateProjectTokenMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createProjectToken>>,
+    TError,
+    { data: BodyType<CreateProjectTokenRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createProjectToken>>,
+  TError,
+  { data: BodyType<CreateProjectTokenRequest> },
+  TContext
+> => {
+  const mutationKey = ["createProjectToken"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createProjectToken>>,
+    { data: BodyType<CreateProjectTokenRequest> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return createProjectToken(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreateProjectTokenMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createProjectToken>>
+>;
+export type CreateProjectTokenMutationBody =
+  BodyType<CreateProjectTokenRequest>;
+export type CreateProjectTokenMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Provision a new project token
+ */
+export const useCreateProjectToken = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createProjectToken>>,
+    TError,
+    { data: BodyType<CreateProjectTokenRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof createProjectToken>>,
+  TError,
+  { data: BodyType<CreateProjectTokenRequest> },
+  TContext
+> => {
+  return useMutation(getCreateProjectTokenMutationOptions(options));
+};
+
+/**
+ * Marks the token as revoked. Subsequent CLI requests using it will return 401.
+ * @summary Revoke a provisioned project token
+ */
+export const getRevokeProjectTokenUrl = (id: number) => {
+  return `/api/tokens/${id}`;
+};
+
+export const revokeProjectToken = async (
+  id: number,
+  options?: RequestInit,
+): Promise<RevokeProjectTokenResponse> => {
+  return customFetch<RevokeProjectTokenResponse>(getRevokeProjectTokenUrl(id), {
+    ...options,
+    method: "DELETE",
+  });
+};
+
+export const getRevokeProjectTokenMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof revokeProjectToken>>,
+    TError,
+    { id: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof revokeProjectToken>>,
+  TError,
+  { id: number },
+  TContext
+> => {
+  const mutationKey = ["revokeProjectToken"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof revokeProjectToken>>,
+    { id: number }
+  > = (props) => {
+    const { id } = props ?? {};
+
+    return revokeProjectToken(id, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RevokeProjectTokenMutationResult = NonNullable<
+  Awaited<ReturnType<typeof revokeProjectToken>>
+>;
+
+export type RevokeProjectTokenMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Revoke a provisioned project token
+ */
+export const useRevokeProjectToken = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof revokeProjectToken>>,
+    TError,
+    { id: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof revokeProjectToken>>,
+  TError,
+  { id: number },
+  TContext
+> => {
+  return useMutation(getRevokeProjectTokenMutationOptions(options));
+};

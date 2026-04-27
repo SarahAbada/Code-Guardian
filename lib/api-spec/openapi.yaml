@@ -12,6 +12,10 @@ tags:
     description: Health operations
   - name: audit
     description: Sentinel security audit operations
+  - name: cli
+    description: Headless CLI / CI integration endpoints
+  - name: tokens
+    description: Project token administration
 paths:
   /healthz:
     get:
@@ -101,7 +105,180 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AuditRulesResponse"
+  /audit-cli:
+    post:
+      operationId: runCliAudit
+      tags: [cli]
+      summary: Headless CLI / CI security audit
+      description: Token-gated audit endpoint for git hooks, pre-commit, and CI pipelines. Returns only the strict security score and high or critical vulnerabilities.
+      security:
+        - bearerAuth: []
+        - apiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CliAuditRequest"
+      responses:
+        "200":
+          description: CLI audit result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CliAuditResponse"
+        "400":
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid project token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "413":
+          description: Payload exceeds maximum allowed size
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: Rate limit exceeded for this token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RateLimitErrorResponse"
+        "500":
+          description: Audit failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /tokens:
+    get:
+      operationId: listProjectTokens
+      tags: [tokens]
+      summary: List provisioned project tokens
+      description: Admin-only listing of provisioned project tokens (raw token values are never returned).
+      security:
+        - adminAuth: []
+      responses:
+        "200":
+          description: Provisioned tokens
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListProjectTokensResponse"
+        "401":
+          description: Missing or invalid admin token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Admin auth not configured on the server
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      operationId: createProjectToken
+      tags: [tokens]
+      summary: Provision a new project token
+      description: Provisions a new sntl_ token. The raw value is returned exactly once and only its SHA-256 hash is persisted.
+      security:
+        - adminAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateProjectTokenRequest"
+      responses:
+        "201":
+          description: Token created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateProjectTokenResponse"
+        "400":
+          description: Invalid project name
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid admin token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Admin auth not configured on the server
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /tokens/{id}:
+    delete:
+      operationId: revokeProjectToken
+      tags: [tokens]
+      summary: Revoke a provisioned project token
+      description: Marks the token as revoked. Subsequent CLI requests using it will return 401.
+      security:
+        - adminAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "200":
+          description: Token revoked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RevokeProjectTokenResponse"
+        "401":
+          description: Missing or invalid admin token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Token not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Admin auth not configured on the server
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: sntl_token
+      description: Per-project Sentinel token sent as 'Authorization Bearer sntl_...'
+    apiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: Per-project Sentinel token sent as 'X-API-Key sntl_...'
+    adminAuth:
+      type: apiKey
+      in: header
+      name: X-Admin-Token
+      description: Admin token from the ADMIN_TOKEN environment variable, required to manage project tokens.
   schemas:
     HealthStatus:
       type: object
@@ -353,3 +530,151 @@ components:
           type: string
       required:
         - message
+    RateLimitErrorResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        retryAfter:
+          type: integer
+          minimum: 0
+          description: Seconds to wait before retrying.
+      required:
+        - message
+        - retryAfter
+    CliAuditRequest:
+      type: object
+      description: Headless audit payload. Provide either 'code' or 'file' (synonyms).
+      properties:
+        code:
+          type: string
+          minLength: 1
+          maxLength: 20000
+        file:
+          type: string
+          minLength: 1
+          maxLength: 20000
+        filename:
+          type: string
+          maxLength: 200
+        language:
+          type: string
+          maxLength: 80
+    CliCriticalVulnerability:
+      type: object
+      properties:
+        type:
+          type: string
+        severity:
+          type: string
+          enum: [high, critical]
+        line:
+          type: integer
+          minimum: 1
+        evidence:
+          type: string
+        remediation:
+          type: string
+      required:
+        - type
+        - severity
+        - line
+        - evidence
+        - remediation
+    CliAuditResponse:
+      type: object
+      properties:
+        security_score:
+          type: integer
+          minimum: 0
+          maximum: 100
+        critical_vulnerabilities:
+          type: array
+          items:
+            $ref: "#/components/schemas/CliCriticalVulnerability"
+      required:
+        - security_score
+        - critical_vulnerabilities
+    ProjectTokenSummary:
+      type: object
+      properties:
+        id:
+          type: integer
+          minimum: 1
+        name:
+          type: string
+        prefix:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        lastUsedAt:
+          type: string
+          format: date-time
+          nullable: true
+        requestCount:
+          type: integer
+          minimum: 0
+        revoked:
+          type: boolean
+      required:
+        - id
+        - name
+        - prefix
+        - createdAt
+        - lastUsedAt
+        - requestCount
+        - revoked
+    ListProjectTokensResponse:
+      type: object
+      properties:
+        tokens:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProjectTokenSummary"
+      required:
+        - tokens
+    CreateProjectTokenRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+      required:
+        - name
+    CreateProjectTokenResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+          minimum: 1
+        name:
+          type: string
+        prefix:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        token:
+          type: string
+        notice:
+          type: string
+      required:
+        - id
+        - name
+        - prefix
+        - createdAt
+        - token
+        - notice
+    RevokeProjectTokenResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+          minimum: 1
+        revoked:
+          type: boolean
+      required:
+        - id
+        - revoked

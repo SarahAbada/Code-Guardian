@@ -17,6 +17,7 @@ import {
   Check,
   Trash2,
   ShieldAlert,
+  Lock,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
@@ -42,14 +43,43 @@ type CreateTokenResponse = {
 const tokensUrl = `${import.meta.env.BASE_URL}api/tokens`;
 const tokenUrl = (id: number) => `${import.meta.env.BASE_URL}api/tokens/${id}`;
 
-async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...(init?.headers ?? {}),
-    },
-  });
+const ADMIN_TOKEN_STORAGE_KEY = "sentinel.adminToken";
+
+class AdminAuthError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "AdminAuthError";
+  }
+}
+
+class AdminConfigError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "AdminConfigError";
+  }
+}
+
+async function jsonFetch<T>(
+  url: string,
+  init: RequestInit | undefined,
+  adminToken: string,
+): Promise<T> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...((init?.headers as Record<string, string> | undefined) ?? {}),
+  };
+  if (adminToken) {
+    headers["X-Admin-Token"] = adminToken;
+  }
+  const res = await fetch(url, { ...init, headers });
+  if (res.status === 401) {
+    throw new AdminAuthError("Admin token is missing or incorrect.");
+  }
+  if (res.status === 503) {
+    throw new AdminConfigError(
+      "Admin auth is not configured on the server. Set the ADMIN_TOKEN environment variable.",
+    );
+  }
   if (!res.ok) {
     const body = (await res.json().catch(() => ({}))) as { message?: string };
     throw new Error(body.message ?? `Request failed: ${res.status}`);
@@ -64,19 +94,50 @@ export function TokenManager() {
   const [creating, setCreating] = useState(false);
   const [newToken, setNewToken] = useState<CreateTokenResponse | null>(null);
   const [copied, setCopied] = useState(false);
+  const [adminToken, setAdminToken] = useState<string>(() => {
+    if (typeof window === "undefined") return "";
+    return window.sessionStorage.getItem(ADMIN_TOKEN_STORAGE_KEY) ?? "";
+  });
+  const [adminUnlocked, setAdminUnlocked] = useState(false);
+  const [adminError, setAdminError] = useState<string | null>(null);
   const { toast } = useToast();
 
-  const refresh = async () => {
+  const persistAdminToken = (value: string) => {
+    setAdminToken(value);
+    if (typeof window !== "undefined") {
+      if (value) {
+        window.sessionStorage.setItem(ADMIN_TOKEN_STORAGE_KEY, value);
+      } else {
+        window.sessionStorage.removeItem(ADMIN_TOKEN_STORAGE_KEY);
+      }
+    }
+  };
+
+  const refresh = async (overrideToken?: string) => {
     setLoading(true);
     try {
-      const data = await jsonFetch<{ tokens: TokenSummary[] }>(tokensUrl);
+      const data = await jsonFetch<{ tokens: TokenSummary[] }>(
+        tokensUrl,
+        undefined,
+        overrideToken ?? adminToken,
+      );
       setTokens(data.tokens);
+      setAdminUnlocked(true);
+      setAdminError(null);
     } catch (err) {
-      toast({
-        title: "Token fetch failed",
-        description: (err as Error).message,
-        variant: "destructive",
-      });
+      if (err instanceof AdminAuthError) {
+        setAdminUnlocked(false);
+        setAdminError(err.message);
+      } else if (err instanceof AdminConfigError) {
+        setAdminUnlocked(false);
+        setAdminError(err.message);
+      } else {
+        toast({
+          title: "Token fetch failed",
+          description: (err as Error).message,
+          variant: "destructive",
+        });
+      }
     } finally {
       setLoading(false);
     }
@@ -98,20 +159,26 @@ export function TokenManager() {
     }
     setCreating(true);
     try {
-      const created = await jsonFetch<CreateTokenResponse>(tokensUrl, {
-        method: "POST",
-        body: JSON.stringify({ name: trimmed }),
-      });
+      const created = await jsonFetch<CreateTokenResponse>(
+        tokensUrl,
+        { method: "POST", body: JSON.stringify({ name: trimmed }) },
+        adminToken,
+      );
       setNewToken(created);
       setName("");
       setCopied(false);
       await refresh();
     } catch (err) {
-      toast({
-        title: "Could not create token",
-        description: (err as Error).message,
-        variant: "destructive",
-      });
+      if (err instanceof AdminAuthError) {
+        setAdminUnlocked(false);
+        setAdminError(err.message);
+      } else {
+        toast({
+          title: "Could not create token",
+          description: (err as Error).message,
+          variant: "destructive",
+        });
+      }
     } finally {
       setCreating(false);
     }
@@ -119,15 +186,20 @@ export function TokenManager() {
 
   const handleRevoke = async (id: number) => {
     try {
-      await jsonFetch(tokenUrl(id), { method: "DELETE" });
+      await jsonFetch(tokenUrl(id), { method: "DELETE" }, adminToken);
       await refresh();
       toast({ title: "Token revoked", description: `Token #${id} revoked.` });
     } catch (err) {
-      toast({
-        title: "Revoke failed",
-        description: (err as Error).message,
-        variant: "destructive",
-      });
+      if (err instanceof AdminAuthError) {
+        setAdminUnlocked(false);
+        setAdminError(err.message);
+      } else {
+        toast({
+          title: "Revoke failed",
+          description: (err as Error).message,
+          variant: "destructive",
+        });
+      }
     }
   };
 
@@ -145,6 +217,67 @@ export function TokenManager() {
       });
     }
   };
+
+  const handleAdminUnlock = async () => {
+    persistAdminToken(adminToken.trim());
+    await refresh(adminToken.trim());
+  };
+
+  if (!adminUnlocked) {
+    return (
+      <Card className="border-border bg-card rounded-none shadow-none">
+        <CardHeader className="border-b border-border bg-secondary/30 rounded-none pb-3">
+          <CardTitle className="text-sm font-bold uppercase tracking-widest text-primary flex items-center gap-2">
+            <Lock className="w-4 h-4" />
+            CLI / API Project Tokens
+          </CardTitle>
+          <CardDescription className="text-xs text-primary/60 font-mono mt-1">
+            Admin token required. Set ADMIN_TOKEN in the server environment, then
+            paste it here to manage CLI project tokens.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="p-4 space-y-3">
+          {adminError && (
+            <div
+              data-testid="admin-error"
+              className="border border-red-500/40 bg-red-500/5 text-xs text-red-400 p-2 font-mono"
+            >
+              {adminError}
+            </div>
+          )}
+          <div className="flex gap-2">
+            <Input
+              type="password"
+              placeholder="Admin token"
+              value={adminToken}
+              onChange={(e) => setAdminToken(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") void handleAdminUnlock();
+              }}
+              data-testid="input-admin-token"
+              className="rounded-none border-border bg-background focus-visible:ring-1 focus-visible:ring-primary font-mono text-xs"
+            />
+            <Button
+              onClick={handleAdminUnlock}
+              disabled={loading}
+              data-testid="button-admin-unlock"
+              variant="ghost"
+              className="rounded-none border border-primary hover:bg-primary hover:text-primary-foreground uppercase tracking-widest text-xs"
+            >
+              {loading ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                "Unlock"
+              )}
+            </Button>
+          </div>
+          <div className="text-[10px] text-primary/40 font-mono">
+            Stored in this browser session only.
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
 
   return (
     <Card className="border-border bg-card rounded-none shadow-none">
@@ -227,7 +360,19 @@ export function TokenManager() {
         <div className="space-y-2">
           <div className="text-[10px] uppercase tracking-widest text-primary/60 border-b border-border pb-1 flex items-center justify-between">
             <span>Provisioned Tokens ({tokens.length})</span>
-            {loading && <Loader2 className="w-3 h-3 animate-spin" />}
+            <div className="flex items-center gap-2">
+              {loading && <Loader2 className="w-3 h-3 animate-spin" />}
+              <button
+                onClick={() => {
+                  persistAdminToken("");
+                  setAdminUnlocked(false);
+                }}
+                data-testid="button-admin-lock"
+                className="text-[9px] uppercase tracking-widest text-primary/40 hover:text-primary"
+              >
+                Lock
+              </button>
+            </div>
           </div>
           {tokens.length === 0 ? (
             <div className="text-xs text-primary/40 italic py-2">

@@ -1,0 +1,30 @@
+Sentinel Architectural Audit Report
+1. Monorepo Boundary Integrity
+Assessment: Well-structured, with one meaningful gap
+
+The SSOT pattern is correctly implemented. lib/api-spec/openapi.yaml → orval.config.ts → generates both lib/api-zod/ (Zod validators) and lib/api-client-react/ (React Query hooks) in a single codegen run. The artifacts/ workspace packages consume these generated outputs as workspace dependencies and never import from each other, preserving clean isolation.
+
+Gap — Two endpoints are outside the SSOT:
+
+POST /api/audit-cli is fully implemented in auditCli.ts but has no entry in openapi.yaml. Its request and response shapes are defined only in prose (README + inline code), not as a contract. There are no generated Zod validators protecting this route's input/output.
+GET|POST|DELETE /api/tokens is similarly absent from the spec.
+Actionable refactor: Add both /audit-cli and /tokens paths to openapi.yaml and re-run codegen. The generated Zod bodies (CreateCliAuditBody, ListTokensResponse, etc.) can then replace the ad-hoc manual type casts in auditCli.ts and tokens.ts.
+
+2. Scalability of the API Layer
+Assessment: Auth and rate limiting are functional but tightly coupled to a single route
+
+The utility functions (extractBearerToken, hashToken, checkRateLimit) are correctly isolated in lib/. However, the actual authentication check (DB lookup, revokedAt guard) and rate-limit enforcement (header writing, 401/429 responses) are inlined as imperative blocks directly inside the router.post("/audit-cli", ...) handler — roughly 30 lines of business logic that sits between the route registration and the actual audit work.
+
+This is not reusable middleware. If a second token-gated endpoint is added tomorrow (e.g., a batch audit endpoint), that entire block must be copy-pasted. Express middleware ((req, res, next) => ...) with a shared type augmentation (req.tokenRow) is the standard pattern for this.
+
+Additional concerns:
+
+GET /api/tokens, POST /api/tokens, DELETE /api/tokens/:id — unauthenticated. Any visitor can enumerate all provisioned tokens, create unlimited new ones, or revoke existing ones. This is a significant missing access control.
+app.use(cors()) with no configuration allows all origins. Given that this is a security-critical internal tool, an explicit allowlist is appropriate.
+No request size limits are set at the Express app level (no express.json({ limit: '...' })). The 20 000-character check is enforced in route logic rather than at the middleware layer.
+Actionable refactors:
+
+Extract a requireToken Express middleware that attaches req.tokenRow to the request and sets X-RateLimit-* headers. Apply it to auditCli and any future gated routes.
+Add an adminAuth middleware (or environment-variable check) to the /tokens management routes.
+Scope cors() to the known frontend origin(s).
+Move express.json({ limit: '25kb' }) to app.ts as a global guard.

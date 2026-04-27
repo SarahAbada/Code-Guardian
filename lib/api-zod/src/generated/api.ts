@@ -171,3 +171,92 @@ export const ChatWithAuditResponse = zod.object({
 export const GetAuditRulesResponse = zod.object({
   rules: zod.array(zod.string()),
 });
+
+/**
+ * Token-gated audit endpoint for git hooks, pre-commit, and CI pipelines. Returns only the strict security score and high or critical vulnerabilities.
+ * @summary Headless CLI / CI security audit
+ */
+export const runCliAuditBodyCodeMax = 20000;
+
+export const runCliAuditBodyFileMax = 20000;
+
+export const runCliAuditBodyFilenameMax = 200;
+
+export const runCliAuditBodyLanguageMax = 80;
+
+export const RunCliAuditBody = zod
+  .object({
+    code: zod.string().min(1).max(runCliAuditBodyCodeMax).optional(),
+    file: zod.string().min(1).max(runCliAuditBodyFileMax).optional(),
+    filename: zod.string().max(runCliAuditBodyFilenameMax).optional(),
+    language: zod.string().max(runCliAuditBodyLanguageMax).optional(),
+  })
+  .describe(
+    "Headless audit payload. Provide either 'code' or 'file' (synonyms).",
+  );
+
+export const runCliAuditResponseSecurityScoreMin = 0;
+export const runCliAuditResponseSecurityScoreMax = 100;
+
+export const RunCliAuditResponse = zod.object({
+  security_score: zod
+    .number()
+    .min(runCliAuditResponseSecurityScoreMin)
+    .max(runCliAuditResponseSecurityScoreMax),
+  critical_vulnerabilities: zod.array(
+    zod.object({
+      type: zod.string(),
+      severity: zod.enum(["high", "critical"]),
+      line: zod.number().min(1),
+      evidence: zod.string(),
+      remediation: zod.string(),
+    }),
+  ),
+});
+
+/**
+ * Admin-only listing of provisioned project tokens (raw token values are never returned).
+ * @summary List provisioned project tokens
+ */
+
+export const listProjectTokensResponseTokensItemRequestCountMin = 0;
+
+export const ListProjectTokensResponse = zod.object({
+  tokens: zod.array(
+    zod.object({
+      id: zod.number().min(1),
+      name: zod.string(),
+      prefix: zod.string(),
+      createdAt: zod.coerce.date(),
+      lastUsedAt: zod.coerce.date().nullable(),
+      requestCount: zod
+        .number()
+        .min(listProjectTokensResponseTokensItemRequestCountMin),
+      revoked: zod.boolean(),
+    }),
+  ),
+});
+
+/**
+ * Provisions a new sntl_ token. The raw value is returned exactly once and only its SHA-256 hash is persisted.
+ * @summary Provision a new project token
+ */
+export const createProjectTokenBodyNameMax = 100;
+
+export const CreateProjectTokenBody = zod.object({
+  name: zod.string().min(1).max(createProjectTokenBodyNameMax),
+});
+
+/**
+ * Marks the token as revoked. Subsequent CLI requests using it will return 401.
+ * @summary Revoke a provisioned project token
+ */
+
+export const RevokeProjectTokenParams = zod.object({
+  id: zod.coerce.number().min(1),
+});
+
+export const RevokeProjectTokenResponse = zod.object({
+  id: zod.number().min(1),
+  revoked: zod.boolean(),
+});

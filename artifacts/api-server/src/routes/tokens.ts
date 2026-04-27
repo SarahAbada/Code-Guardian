@@ -1,9 +1,13 @@
 import { Router, type IRouter } from "express";
 import { db, projectTokens } from "@workspace/db";
 import { desc, eq, isNull } from "drizzle-orm";
+import { CreateProjectTokenBody } from "@workspace/api-zod";
 import { generateToken } from "../lib/tokens";
+import { requireAdmin } from "../middleware/requireAdmin";
 
 const router: IRouter = Router();
+
+router.use("/tokens", requireAdmin);
 
 router.get("/tokens", async (_req, res) => {
   const rows = await db
@@ -33,11 +37,20 @@ router.get("/tokens", async (_req, res) => {
 });
 
 router.post("/tokens", async (req, res) => {
-  const body = req.body as { name?: unknown };
-  const rawName = typeof body.name === "string" ? body.name.trim() : "";
+  const validation = CreateProjectTokenBody.safeParse(req.body);
 
-  if (!rawName || rawName.length > 100) {
-    res.status(400).json({ message: "Provide a project name (1-100 characters)." });
+  if (!validation.success) {
+    res
+      .status(400)
+      .json({ message: "Provide a project name (1-100 characters)." });
+    return;
+  }
+
+  const rawName = validation.data.name.trim();
+  if (!rawName) {
+    res
+      .status(400)
+      .json({ message: "Provide a project name (1-100 characters)." });
     return;
   }
 

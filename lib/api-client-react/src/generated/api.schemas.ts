@@ -158,3 +158,98 @@ export interface AuditRulesResponse {
 export interface ErrorResponse {
   message: string;
 }
+
+export interface RateLimitErrorResponse {
+  message: string;
+  /**
+   * Seconds to wait before retrying.
+   * @minimum 0
+   */
+  retryAfter: number;
+}
+
+/**
+ * Headless audit payload. Provide either 'code' or 'file' (synonyms).
+ */
+export interface CliAuditRequest {
+  /**
+   * @minLength 1
+   * @maxLength 20000
+   */
+  code?: string;
+  /**
+   * @minLength 1
+   * @maxLength 20000
+   */
+  file?: string;
+  /** @maxLength 200 */
+  filename?: string;
+  /** @maxLength 80 */
+  language?: string;
+}
+
+export type CliCriticalVulnerabilitySeverity =
+  (typeof CliCriticalVulnerabilitySeverity)[keyof typeof CliCriticalVulnerabilitySeverity];
+
+export const CliCriticalVulnerabilitySeverity = {
+  high: "high",
+  critical: "critical",
+} as const;
+
+export interface CliCriticalVulnerability {
+  type: string;
+  severity: CliCriticalVulnerabilitySeverity;
+  /** @minimum 1 */
+  line: number;
+  evidence: string;
+  remediation: string;
+}
+
+export interface CliAuditResponse {
+  /**
+   * @minimum 0
+   * @maximum 100
+   */
+  security_score: number;
+  critical_vulnerabilities: CliCriticalVulnerability[];
+}
+
+export interface ProjectTokenSummary {
+  /** @minimum 1 */
+  id: number;
+  name: string;
+  prefix: string;
+  createdAt: string;
+  lastUsedAt: string | null;
+  /** @minimum 0 */
+  requestCount: number;
+  revoked: boolean;
+}
+
+export interface ListProjectTokensResponse {
+  tokens: ProjectTokenSummary[];
+}
+
+export interface CreateProjectTokenRequest {
+  /**
+   * @minLength 1
+   * @maxLength 100
+   */
+  name: string;
+}
+
+export interface CreateProjectTokenResponse {
+  /** @minimum 1 */
+  id: number;
+  name: string;
+  prefix: string;
+  createdAt: string;
+  token: string;
+  notice: string;
+}
+
+export interface RevokeProjectTokenResponse {
+  /** @minimum 1 */
+  id: number;
+  revoked: boolean;
+}
